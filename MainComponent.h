@@ -42,7 +42,39 @@ private:
 
     juce::Slider speedSlider;
     juce::Label speedLabel          { {}, "Speed:" };
+
+    juce::Slider delayFeedbackSlider;
+    juce::Label delayFeedbackLabel  { {}, "Feedback:" };
+
+    juce::Slider delayWetDrySlider;
+    juce::Label delayWetDryLabel    { {}, "Delay Wet/Dry:" };
+
+    juce::Slider reverbRoomSizeSlider;
+    juce::Label reverbRoomSizeLabel { {}, "Room Size:" };
+
+    juce::Slider reverbWetDrySlider;
+    juce::Label reverbWetDryLabel   { {}, "Reverb Wet/Dry:" };
+
+    juce::Slider reverbDampingSlider;
+    juce::Label reverbDampingLabel  { {}, "Reverb Damping:" };
+    juce::Slider reverbWidthSlider;
+    juce::Label reverbWidthLabel    { {}, "Reverb Width:" };
+
+    juce::Slider flangerRateSlider;
+    juce::Label flangerRateLabel    { {}, "Flanger Rate:" };
+    juce::Slider flangerDepthSlider;
+    juce::Label flangerDepthLabel   { {}, "Flanger Depth:" };
+    juce::Slider flangerFeedbackSlider;
+    juce::Label flangerFeedbackLabel{ {}, "Flanger F/back:" };
+    juce::Slider flangerMixSlider;
+    juce::Label flangerMixLabel     { {}, "Flanger Mix:" };
     
+    std::unique_ptr<juce::dsp::DelayLine<float>> delayLine;
+    std::unique_ptr<juce::dsp::Reverb> reverb;
+    std::unique_ptr<juce::dsp::Chorus<float>> flanger;
+
+    double currentSampleRate = 0.0;
+
     std::unique_ptr<AudioRecorder> recorder;
     RecordingThumbnail recordingThumbnail;
     

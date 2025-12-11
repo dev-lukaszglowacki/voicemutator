@@ -33,10 +33,71 @@ MainComponent::MainComponent() : state(Stopped)
     };
 
     addAndMakeVisible(speedLabel);
+    speedLabel.setColour (juce::Label::textColourId, juce::Colours::black);
     
+    addAndMakeVisible (delayFeedbackSlider);
+    delayFeedbackSlider.setRange (0.0, 0.99);
+    delayFeedbackSlider.setValue (0.0);
+    addAndMakeVisible(delayFeedbackLabel);
+    delayFeedbackLabel.setColour (juce::Label::textColourId, juce::Colours::black);
+
+    addAndMakeVisible (delayWetDrySlider);
+    delayWetDrySlider.setRange (0.0, 1.0);
+    delayWetDrySlider.setValue (0.0);
+    addAndMakeVisible(delayWetDryLabel);
+    delayWetDryLabel.setColour (juce::Label::textColourId, juce::Colours::black);
+
+    addAndMakeVisible (reverbRoomSizeSlider);
+    reverbRoomSizeSlider.setRange (0.0, 1.0);
+    reverbRoomSizeSlider.setValue (0.5);
+    addAndMakeVisible(reverbRoomSizeLabel);
+    reverbRoomSizeLabel.setColour (juce::Label::textColourId, juce::Colours::black);
+
+    addAndMakeVisible (reverbWetDrySlider);
+    reverbWetDrySlider.setRange (0.0, 1.0);
+    reverbWetDrySlider.setValue (0.0);
+    addAndMakeVisible(reverbWetDryLabel);
+    reverbWetDryLabel.setColour (juce::Label::textColourId, juce::Colours::black);
+    
+    addAndMakeVisible(reverbDampingSlider);
+    reverbDampingSlider.setRange(0.0, 1.0);
+    reverbDampingSlider.setValue(0.5);
+    addAndMakeVisible(reverbDampingLabel);
+    reverbDampingLabel.setColour (juce::Label::textColourId, juce::Colours::black);
+
+    addAndMakeVisible(reverbWidthSlider);
+    reverbWidthSlider.setRange(0.0, 1.0);
+    reverbWidthSlider.setValue(1.0);
+    addAndMakeVisible(reverbWidthLabel);
+    reverbWidthLabel.setColour (juce::Label::textColourId, juce::Colours::black);
+
+    addAndMakeVisible(flangerRateSlider);
+    flangerRateSlider.setRange(0.0, 10.0);
+    flangerRateSlider.setValue(1.0);
+    addAndMakeVisible(flangerRateLabel);
+    flangerRateLabel.setColour (juce::Label::textColourId, juce::Colours::black);
+
+    addAndMakeVisible(flangerDepthSlider);
+    flangerDepthSlider.setRange(0.0, 1.0);
+    flangerDepthSlider.setValue(0.5);
+    addAndMakeVisible(flangerDepthLabel);
+    flangerDepthLabel.setColour (juce::Label::textColourId, juce::Colours::black);
+
+    addAndMakeVisible(flangerFeedbackSlider);
+    flangerFeedbackSlider.setRange(0.0, 0.99);
+    flangerFeedbackSlider.setValue(0.2);
+    addAndMakeVisible(flangerFeedbackLabel);
+    flangerFeedbackLabel.setColour (juce::Label::textColourId, juce::Colours::black);
+
+    addAndMakeVisible(flangerMixSlider);
+    flangerMixSlider.setRange(0.0, 1.0);
+    flangerMixSlider.setValue(0.0);
+    addAndMakeVisible(flangerMixLabel);
+    flangerMixLabel.setColour (juce::Label::textColourId, juce::Colours::black);
+
     addAndMakeVisible(recordingThumbnail);
 
-    setSize (500, 500);
+    setSize (500, 800);
 
     formatManager.registerBasicFormats();
     transportSource.addChangeListener (this);
@@ -58,12 +119,77 @@ MainComponent::~MainComponent()
 
 void MainComponent::prepareToPlay (int samplesPerBlockExpected, double sampleRate)
 {
+    currentSampleRate = sampleRate;
     resamplingSource->prepareToPlay (samplesPerBlockExpected, sampleRate);
+    
+    delayLine = std::make_unique<juce::dsp::DelayLine<float>>(sampleRate);
+    delayLine->prepare({ sampleRate, (juce::uint32) samplesPerBlockExpected, 2 });
+    delayLine->setMaximumDelayInSamples(sampleRate);
+
+    reverb = std::make_unique<juce::dsp::Reverb>();
+    reverb->prepare({ sampleRate, (juce::uint32) samplesPerBlockExpected, 2 });
+
+    flanger = std::make_unique<juce::dsp::Chorus<float>>();
+    flanger->prepare({ sampleRate, (juce::uint32) samplesPerBlockExpected, 2 });
 }
 
 void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& bufferToFill)
 {
     resamplingSource->getNextAudioBlock (bufferToFill);
+
+    if (delayLine != nullptr)
+    {
+        auto* leftChannel = bufferToFill.buffer->getWritePointer(0);
+        auto* rightChannel = bufferToFill.buffer->getWritePointer(1);
+
+        auto feedback = delayFeedbackSlider.getValue();
+        auto wet = delayWetDrySlider.getValue();
+        auto dry = 1.0 - wet;
+
+        for (int i = 0; i < bufferToFill.numSamples; ++i)
+        {
+            delayLine->setDelay(0.5 * currentSampleRate);
+
+            auto delayedLeft = delayLine->popSample(0);
+            auto delayedRight = delayLine->popSample(1);
+
+            auto mixedLeft = (leftChannel[i] * dry) + (delayedLeft * wet);
+            auto mixedRight = (rightChannel[i] * dry) + (delayedRight * wet);
+
+            delayLine->pushSample(0, leftChannel[i] + delayedLeft * feedback);
+            delayLine->pushSample(1, rightChannel[i] + delayedRight * feedback);
+
+            leftChannel[i] = mixedLeft;
+            rightChannel[i] = mixedRight;
+        }
+    }
+
+    if (reverb != nullptr)
+    {
+        juce::dsp::Reverb::Parameters params;
+        params.roomSize = reverbRoomSizeSlider.getValue();
+        params.wetLevel = reverbWetDrySlider.getValue();
+        params.dryLevel = 1.0f - params.wetLevel;
+        params.damping = reverbDampingSlider.getValue();
+        params.width = reverbWidthSlider.getValue();
+        reverb->setParameters(params);
+
+        juce::dsp::AudioBlock<float> block (*(bufferToFill.buffer));
+        juce::dsp::ProcessContextReplacing<float> context (block);
+        reverb->process(context);
+    }
+    
+    if (flanger != nullptr)
+    {
+        flanger->setRate(flangerRateSlider.getValue());
+        flanger->setDepth(flangerDepthSlider.getValue());
+        flanger->setFeedback(flangerFeedbackSlider.getValue());
+        flanger->setMix(flangerMixSlider.getValue());
+
+        juce::dsp::AudioBlock<float> block (*(bufferToFill.buffer));
+        juce::dsp::ProcessContextReplacing<float> context (block);
+        flanger->process(context);
+    }
 }
 
 void MainComponent::releaseResources()
@@ -84,8 +210,48 @@ void MainComponent::resized()
     playButton.setBounds (area.removeFromTop (36).removeFromLeft (140).reduced (8));
     
     auto sliderArea = area.removeFromTop(36);
-    speedLabel.setBounds(sliderArea.removeFromLeft(50).reduced(8));
+    speedLabel.setBounds(sliderArea.removeFromLeft(120).reduced(8));
     speedSlider.setBounds(sliderArea.reduced(8));
+
+    auto feedbackSliderArea = area.removeFromTop(36);
+    delayFeedbackLabel.setBounds(feedbackSliderArea.removeFromLeft(120).reduced(8));
+    delayFeedbackSlider.setBounds(feedbackSliderArea.reduced(8));
+
+    auto wetDrySliderArea = area.removeFromTop(36);
+    delayWetDryLabel.setBounds(wetDrySliderArea.removeFromLeft(120).reduced(8));
+    delayWetDrySlider.setBounds(wetDrySliderArea.reduced(8));
+
+    auto roomSizeSliderArea = area.removeFromTop(36);
+    reverbRoomSizeLabel.setBounds(roomSizeSliderArea.removeFromLeft(120).reduced(8));
+    reverbRoomSizeSlider.setBounds(roomSizeSliderArea.reduced(8));
+
+    auto reverbWetDrySliderArea = area.removeFromTop(36);
+    reverbWetDryLabel.setBounds(reverbWetDrySliderArea.removeFromLeft(120).reduced(8));
+    reverbWetDrySlider.setBounds(reverbWetDrySliderArea.reduced(8));
+
+    auto reverbDampingArea = area.removeFromTop(36);
+    reverbDampingLabel.setBounds(reverbDampingArea.removeFromLeft(120).reduced(8));
+    reverbDampingSlider.setBounds(reverbDampingArea.reduced(8));
+
+    auto reverbWidthArea = area.removeFromTop(36);
+    reverbWidthLabel.setBounds(reverbWidthArea.removeFromLeft(120).reduced(8));
+    reverbWidthSlider.setBounds(reverbWidthArea.reduced(8));
+
+    auto flangerRateArea = area.removeFromTop(36);
+    flangerRateLabel.setBounds(flangerRateArea.removeFromLeft(120).reduced(8));
+    flangerRateSlider.setBounds(flangerRateArea.reduced(8));
+
+    auto flangerDepthArea = area.removeFromTop(36);
+    flangerDepthLabel.setBounds(flangerDepthArea.removeFromLeft(120).reduced(8));
+    flangerDepthSlider.setBounds(flangerDepthArea.reduced(8));
+
+    auto flangerFeedbackArea = area.removeFromTop(36);
+    flangerFeedbackLabel.setBounds(flangerFeedbackArea.removeFromLeft(120).reduced(8));
+    flangerFeedbackSlider.setBounds(flangerFeedbackArea.reduced(8));
+
+    auto flangerMixArea = area.removeFromTop(36);
+    flangerMixLabel.setBounds(flangerMixArea.removeFromLeft(120).reduced(8));
+    flangerMixSlider.setBounds(flangerMixArea.reduced(8));
 }
 
 void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
@@ -117,6 +283,13 @@ void MainComponent::stopRecording()
 
 void MainComponent::startPlaying()
 {
+    if (delayLine != nullptr)
+        delayLine->reset();
+    if (reverb != nullptr)
+        reverb->reset();
+    if (flanger != nullptr)
+        flanger->reset();
+        
     transportSource.stop();
     transportSource.setSource (nullptr);
 
