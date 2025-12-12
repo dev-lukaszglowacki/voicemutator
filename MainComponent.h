@@ -68,6 +68,9 @@ private:
     juce::Label flangerFeedbackLabel{ {}, "Flanger F/back:" };
     juce::Slider flangerMixSlider;
     juce::Label flangerMixLabel     { {}, "Flanger Mix:" };
+
+    juce::Slider pitchShiftSlider;
+    juce::Label pitchShiftLabel     { {}, "Pitch Shift:" };
     
     std::unique_ptr<juce::dsp::DelayLine<float>> delayLine;
     std::unique_ptr<juce::dsp::Reverb> reverb;
