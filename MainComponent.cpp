@@ -95,6 +95,21 @@ MainComponent::MainComponent() : state(Stopped)
     addAndMakeVisible(flangerMixLabel);
     flangerMixLabel.setColour (juce::Label::textColourId, juce::Colours::black);
 
+    addAndMakeVisible (pitchShiftSlider);
+    pitchShiftSlider.setRange (-12.0, 12.0, 1.0);
+    pitchShiftSlider.setValue (0.0);
+    pitchShiftSlider.onValueChange = [this] {
+        if (resamplingSource != nullptr)
+        {
+            double speed = speedSlider.getValue();
+            double pitchSemitones = pitchShiftSlider.getValue();
+            double pitchRatio = std::pow (2.0, pitchSemitones / 12.0);
+            resamplingSource->setResamplingRatio (speed * pitchRatio);
+        }
+    };
+    addAndMakeVisible(pitchShiftLabel);
+    pitchShiftLabel.setColour (juce::Label::textColourId, juce::Colours::black);
+
     addAndMakeVisible(recordingThumbnail);
 
     setSize (500, 800);
@@ -252,6 +267,10 @@ void MainComponent::resized()
     auto flangerMixArea = area.removeFromTop(36);
     flangerMixLabel.setBounds(flangerMixArea.removeFromLeft(120).reduced(8));
     flangerMixSlider.setBounds(flangerMixArea.reduced(8));
+
+    auto pitchShiftArea = area.removeFromTop(36);
+    pitchShiftLabel.setBounds(pitchShiftArea.removeFromLeft(120).reduced(8));
+    pitchShiftSlider.setBounds(pitchShiftArea.reduced(8));
 }
 
 void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
