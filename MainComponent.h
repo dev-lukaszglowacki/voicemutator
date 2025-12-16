@@ -69,12 +69,15 @@ private:
     juce::Slider flangerMixSlider;
     juce::Label flangerMixLabel     { {}, "Flanger Mix:" };
 
-    juce::Slider pitchShiftSlider;
-    juce::Label pitchShiftLabel     { {}, "Pitch Shift:" };
+    juce::Slider distortionDriveSlider;
+    juce::Label distortionDriveLabel { {}, "Distortion Drive:" };
+    juce::Slider distortionMixSlider;
+    juce::Label distortionMixLabel   { {}, "Distortion Mix:" };
     
     std::unique_ptr<juce::dsp::DelayLine<float>> delayLine;
     std::unique_ptr<juce::dsp::Reverb> reverb;
     std::unique_ptr<juce::dsp::Chorus<float>> flanger;
+    std::unique_ptr<juce::dsp::Oversampling<float>> oversampling;
 
     double currentSampleRate = 0.0;
 

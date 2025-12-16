@@ -85,7 +85,7 @@ MainComponent::MainComponent() : state(Stopped)
 
     addAndMakeVisible(flangerFeedbackSlider);
     flangerFeedbackSlider.setRange(0.0, 0.99);
-    flangerFeedbackSlider.setValue(0.2);
+    flangerFeedbackSlider.setValue(0.0);
     addAndMakeVisible(flangerFeedbackLabel);
     flangerFeedbackLabel.setColour (juce::Label::textColourId, juce::Colours::black);
 
@@ -95,20 +95,17 @@ MainComponent::MainComponent() : state(Stopped)
     addAndMakeVisible(flangerMixLabel);
     flangerMixLabel.setColour (juce::Label::textColourId, juce::Colours::black);
 
-    addAndMakeVisible (pitchShiftSlider);
-    pitchShiftSlider.setRange (-12.0, 12.0, 1.0);
-    pitchShiftSlider.setValue (0.0);
-    pitchShiftSlider.onValueChange = [this] {
-        if (resamplingSource != nullptr)
-        {
-            double speed = speedSlider.getValue();
-            double pitchSemitones = pitchShiftSlider.getValue();
-            double pitchRatio = std::pow (2.0, pitchSemitones / 12.0);
-            resamplingSource->setResamplingRatio (speed * pitchRatio);
-        }
-    };
-    addAndMakeVisible(pitchShiftLabel);
-    pitchShiftLabel.setColour (juce::Label::textColourId, juce::Colours::black);
+    addAndMakeVisible (distortionDriveSlider);
+    distortionDriveSlider.setRange (1.0, 10.0);
+    distortionDriveSlider.setValue (1.0);
+    addAndMakeVisible(distortionDriveLabel);
+    distortionDriveLabel.setColour (juce::Label::textColourId, juce::Colours::black);
+
+    addAndMakeVisible (distortionMixSlider);
+    distortionMixSlider.setRange (0.0, 1.0);
+    distortionMixSlider.setValue (0.0);
+    addAndMakeVisible(distortionMixLabel);
+    distortionMixLabel.setColour (juce::Label::textColourId, juce::Colours::black);
 
     addAndMakeVisible(recordingThumbnail);
 
@@ -146,6 +143,9 @@ void MainComponent::prepareToPlay (int samplesPerBlockExpected, double sampleRat
 
     flanger = std::make_unique<juce::dsp::Chorus<float>>();
     flanger->prepare({ sampleRate, (juce::uint32) samplesPerBlockExpected, 2 });
+
+    oversampling = std::make_unique<juce::dsp::Oversampling<float>>(2, 4, juce::dsp::Oversampling<float>::FilterType::filterHalfBandFIREquiripple);
+    oversampling->initProcessing(samplesPerBlockExpected);
 }
 
 void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& bufferToFill)
@@ -159,23 +159,27 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& buffe
 
         auto feedback = delayFeedbackSlider.getValue();
         auto wet = delayWetDrySlider.getValue();
-        auto dry = 1.0 - wet;
 
-        for (int i = 0; i < bufferToFill.numSamples; ++i)
+        if (wet > 0.0)
         {
-            delayLine->setDelay(0.5 * currentSampleRate);
+            auto dry = 1.0 - wet;
 
-            auto delayedLeft = delayLine->popSample(0);
-            auto delayedRight = delayLine->popSample(1);
+            for (int i = 0; i < bufferToFill.numSamples; ++i)
+            {
+                delayLine->setDelay(0.5 * currentSampleRate);
 
-            auto mixedLeft = (leftChannel[i] * dry) + (delayedLeft * wet);
-            auto mixedRight = (rightChannel[i] * dry) + (delayedRight * wet);
+                auto delayedLeft = delayLine->popSample(0);
+                auto delayedRight = delayLine->popSample(1);
 
-            delayLine->pushSample(0, leftChannel[i] + delayedLeft * feedback);
-            delayLine->pushSample(1, rightChannel[i] + delayedRight * feedback);
+                auto mixedLeft = (leftChannel[i] * dry) + (delayedLeft * wet);
+                auto mixedRight = (rightChannel[i] * dry) + (delayedRight * wet);
 
-            leftChannel[i] = mixedLeft;
-            rightChannel[i] = mixedRight;
+                delayLine->pushSample(0, leftChannel[i] + delayedLeft * feedback);
+                delayLine->pushSample(1, rightChannel[i] + delayedRight * feedback);
+
+                leftChannel[i] = mixedLeft;
+                rightChannel[i] = mixedRight;
+            }
         }
     }
 
@@ -204,6 +208,36 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& buffe
         juce::dsp::AudioBlock<float> block (*(bufferToFill.buffer));
         juce::dsp::ProcessContextReplacing<float> context (block);
         flanger->process(context);
+    }
+
+    if (oversampling != nullptr && distortionMixSlider.getValue() > 0.0)
+    {
+        juce::dsp::AudioBlock<float> block (*(bufferToFill.buffer));
+        juce::dsp::AudioBlock<float> oversampledBlock = oversampling->processSamplesUp(block);
+
+        auto* leftChannel = oversampledBlock.getChannelPointer(0);
+        auto* rightChannel = oversampledBlock.getChannelPointer(1);
+        auto drive = distortionDriveSlider.getValue();
+
+        for (int i = 0; i < oversampledBlock.getNumSamples(); ++i)
+        {
+            leftChannel[i] = std::tanh(leftChannel[i] * drive);
+            rightChannel[i] = std::tanh(rightChannel[i] * drive);
+        }
+
+        oversampling->processSamplesDown(block);
+        
+        auto mix = distortionMixSlider.getValue();
+        auto* originalLeft = bufferToFill.buffer->getReadPointer(0);
+        auto* originalRight = bufferToFill.buffer->getReadPointer(1);
+        auto* distortedLeft = block.getChannelPointer(0);
+        auto* distortedRight = block.getChannelPointer(1);
+
+        for (int i = 0; i < bufferToFill.numSamples; ++i)
+        {
+            distortedLeft[i] = originalLeft[i] * (1.0f - mix) + distortedLeft[i] * mix;
+            distortedRight[i] = originalRight[i] * (1.0f - mix) + distortedRight[i] * mix;
+        }
     }
 }
 
@@ -268,9 +302,13 @@ void MainComponent::resized()
     flangerMixLabel.setBounds(flangerMixArea.removeFromLeft(120).reduced(8));
     flangerMixSlider.setBounds(flangerMixArea.reduced(8));
 
-    auto pitchShiftArea = area.removeFromTop(36);
-    pitchShiftLabel.setBounds(pitchShiftArea.removeFromLeft(120).reduced(8));
-    pitchShiftSlider.setBounds(pitchShiftArea.reduced(8));
+    auto distortionDriveArea = area.removeFromTop(36);
+    distortionDriveLabel.setBounds(distortionDriveArea.removeFromLeft(120).reduced(8));
+    distortionDriveSlider.setBounds(distortionDriveArea.reduced(8));
+
+    auto distortionMixArea = area.removeFromTop(36);
+    distortionMixLabel.setBounds(distortionMixArea.removeFromLeft(120).reduced(8));
+    distortionMixSlider.setBounds(distortionMixArea.reduced(8));
 }
 
 void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
@@ -308,6 +346,8 @@ void MainComponent::startPlaying()
         reverb->reset();
     if (flanger != nullptr)
         flanger->reset();
+    if (oversampling != nullptr)
+        oversampling->reset();
         
     transportSource.stop();
     transportSource.setSource (nullptr);
